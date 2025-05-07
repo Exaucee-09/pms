@@ -1,0 +1,562 @@
+# Documentation of payment steps
+
+To get the UID of a specific rfid :
+---------------------------------------------------------------------------------------------------------
+
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 9
+#define SS_PIN 10
+
+MFRC522 rfid(SS_PIN, RST_PIN); // Create MFRC522 instance
+
+void setup() {
+  Serial.begin(9600); // Initialize serial communication
+  SPI.begin();        // Initialize SPI bus
+  rfid.PCD_Init();    // Initialize RFID reader
+  Serial.println("Scan an RFID card to see its UID...");
+}
+
+void loop() {
+  // Check if a new card is present
+  if (!rfid.PICC_IsNewCardPresent()) {
+    return;
+  }
+
+  // Check if the card's UID can be read
+  if (!rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Print the UID
+  Serial.print("Card UID: ");
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    Serial.print(rfid.uid.uidByte[i] < 0x10 ? " 0" : " ");
+    Serial.print(rfid.uid.uidByte[i], HEX);
+  }
+  Serial.println();
+
+  // Halt PICC (card) and stop encryption
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(1000); // Delay before the next scan
+}
+
+
+----------------------------------------------------------------------------------------------------------
+
+
+
+Reading the RFID's data :
+
+---------------------------------------------------------------------------------------
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 9
+#define SS_PIN 10
+
+MFRC522 rfid(SS_PIN, RST_PIN); // Create MFRC522 instance
+MFRC522::MIFARE_Key key;
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("Scan the RFID card to read data...");
+
+  // Prepare the default key (0xFF 0xFF 0xFF 0xFF 0xFF 0xFF)
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+}
+
+void loop() {
+  // Check for a new card
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Verify the UID
+  byte expectedUID[] = {0x5B, 0xED, 0x5F, 0x3B};
+  bool uidMatch = true;
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] != expectedUID[i]) {
+      uidMatch = false;
+      break;
+    }
+  }
+
+  if (!uidMatch) {
+    Serial.println("This card's UID does not match 5B ED 5F 3B.");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Authenticate for sector 1 (blocks 4-7) using key A
+  byte sector = 1;
+  byte blockAddr = 4; // Starting block for sector 1
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Authentication failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+
+  // Read block 4 (license plate)
+  byte buffer[18]; // 16 bytes data + 2 bytes CRC
+  byte size = 18;
+  Serial.print("Reading license plate from block 4: ");
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  for (byte i = 0; i < 16; i++) {
+    Serial.print((char)buffer[i]);
+  }
+  Serial.println();
+
+  // Read block 5 (cash amount)
+  blockAddr = 5;
+  Serial.print("Reading cash amount from block 5: ");
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  for (byte i = 0; i < 16; i++) {
+    Serial.print((char)buffer[i]);
+  }
+  Serial.println();
+
+  // Halt PICC and stop encryption
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(1000);
+}
+-----------------------------------------------------------------------------------------------------------------------
+
+for writing on the rfid :
+
+--------------------------------------------------------------------------------------------------------
+
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 9
+#define SS_PIN 10
+
+MFRC522 rfid(SS_PIN, RST_PIN); // Create MFRC522 instance
+MFRC522::MIFARE_Key key;
+
+// Data to write
+String licensePlate = "RAH972U"; // License plate
+String cashAmount = "100000";    // Cash amount
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("Scan the RFID card to write data...");
+
+  // Prepare the default key (0xFF 0xFF 0xFF 0xFF 0xFF 0xFF)
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+}
+
+void loop() {
+  // Check for a new card
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Verify the UID
+  byte expectedUID[] = {0x5B, 0xED, 0x5F, 0x3B};
+  bool uidMatch = true;
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] != expectedUID[i]) {
+      uidMatch = false;
+      break;
+    }
+  }
+
+  if (!uidMatch) {
+    Serial.println("This card's UID does not match 5B ED 5F 3B. Aborting write.");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Authenticate for sector 1 (blocks 4-7) using key A
+  byte sector = 1;
+  byte blockAddr = 4; // Starting block for sector 1
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Authentication failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+
+  // Prepare data for block 4 (license plate)
+  byte buffer[18]; // 16 bytes data + 2 bytes CRC
+  byte size = 16;
+  for (byte i = 0; i < size; i++) {
+    buffer[i] = (i < licensePlate.length()) ? licensePlate[i] : ' '; // Pad with spaces
+  }
+
+  // Write to block 4
+  Serial.print("Writing license plate to block 4...");
+  status = rfid.MIFARE_Write(blockAddr, buffer, size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Write failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  Serial.println("Done");
+
+  // Prepare data for block 5 (cash amount)
+  blockAddr = 5;
+  for (byte i = 0; i < size; i++) {
+    buffer[i] = (i < cashAmount.length()) ? cashAmount[i] : ' '; // Pad with spaces
+  }
+
+  // Write to block 5
+  Serial.print("Writing cash amount to block 5...");
+  status = rfid.MIFARE_Write(blockAddr, buffer, size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Write failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  Serial.println("Done");
+
+  // Halt PICC and stop encryption
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(1000);
+}
+
+----------------------------------------------------------------------------------------------------------------
+
+
+Requesting the duration and charging the depending on the set money 
+
+----------------------------------------------------------------------------------------------------------------
+
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 9
+#define SS_PIN 10
+
+MFRC522 rfid(SS_PIN, RST_PIN); // Create MFRC522 instance
+MFRC522::MIFARE_Key key;
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("--------------------------------");
+  Serial.println("    Parking Fee Calculator");
+  Serial.println("--------------------------------");
+  Serial.println("Scan the RFID card to start...");
+  Serial.println("--------------------------------");
+
+  // Prepare the default key (0xFF 0xFF 0xFF 0xFF 0xFF 0xFF)
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+}
+
+void loop() {
+  // Check for a new card
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Verify the UID (assuming 5B ED 5F 3B from previous context)
+  byte expectedUID[] = {0x5B, 0xED, 0x5F, 0x3B};
+  bool uidMatch = true;
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] != expectedUID[i]) {
+      uidMatch = false;
+      break;
+    }
+  }
+
+  if (!uidMatch) {
+    Serial.println("This card's UID does not match 5B ED 5F 3B.");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Authenticate for sector 1 (blocks 4-7) using key A
+  byte blockAddr = 4;
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Authentication failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+
+  // Read current license plate and cash amount
+  byte buffer[18];
+  byte size = 18;
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  String licensePlate = "";
+  for (byte i = 0; i < 16; i++) {
+    if (buffer[i] != ' ') licensePlate += (char)buffer[i];
+  }
+  blockAddr = 5;
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  String cashStr = "";
+  for (byte i = 0; i < 16; i++) {
+    if (buffer[i] != ' ') cashStr += (char)buffer[i];
+  }
+  long currentCash = cashStr.toInt();
+
+  // Prompt user for parking hours
+  Serial.println("--------------------------------");
+  Serial.print("Enter the number of hours parked for license plate ");
+  Serial.print(licensePlate);
+  Serial.println(":");
+  while (Serial.available() == 0) {} // Wait for input
+  float hours = Serial.parseFloat();
+  Serial.read(); // Clear the buffer
+  Serial.println("--------------------------------");
+
+  // Calculate charge
+  float minutes = hours * 60;
+  long charge = 0;
+  if (minutes > 30) {
+    charge = ((long)((minutes - 30 + 29) / 30)) * 100; // Round up to next 30-min period
+  }
+  long newCash = currentCash - charge;
+  if (newCash < 0) {
+    Serial.println("--------------------------------");
+    Serial.println("Insufficient funds! Please add more cash.");
+    Serial.println("--------------------------------");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Prepare and write new cash amount
+  String newCashStr = String(newCash);
+  for (byte i = 0; i < 16; i++) {
+    buffer[i] = (i < newCashStr.length()) ? newCashStr[i] : ' ';
+  }
+  blockAddr = 5;
+  Serial.print("Updating cash amount to block 5...");
+  status = rfid.MIFARE_Write(blockAddr, buffer, 16);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Write failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    return;
+  }
+  Serial.println("Done");
+
+  // Styled output
+  Serial.println("--------------------------------");
+  Serial.println("    Parking Fee Calculation");
+  Serial.println("--------------------------------");
+  Serial.print("License Plate: ");
+  Serial.println(licensePlate);
+  Serial.print("Parking Time: ");
+  Serial.print(hours);
+  Serial.println(" hours");
+  Serial.print("Charge: ");
+  Serial.print(charge);
+  Serial.println(" units");
+  Serial.print("Previous Balance: ");
+  Serial.print(currentCash);
+  Serial.println(" units");
+  Serial.print("New Balance: ");
+  Serial.print(newCash);
+  Serial.println(" units");
+  Serial.println("--------------------------------");
+
+  // Halt PICC and stop encryption
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(1000);
+}
+
+-----------------------------------------------------------------------------------------
+
+Syncing arduino with our python script to charge according to the duration the vehicle spent parking
+
+-------------------------------------------------------------------------------------------
+
+#include <SPI.h>
+#include <MFRC522.h>
+
+#define RST_PIN 9
+#define SS_PIN 10
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+MFRC522::MIFARE_Key key;
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("--------------------------------");
+  Serial.println("    Parking Fee Calculator");
+  Serial.println("--------------------------------");
+  Serial.println("Scan the RFID card to start...");
+  Serial.println("--------------------------------");
+
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
+  }
+}
+
+void loop() {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+
+  // Verify UID
+  byte expectedUID[] = {0x23, 0x5F, 0x87, 0xF5}; // Update if needed
+  bool uidMatch = true;
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] != expectedUID[i]) {
+      uidMatch = false;
+      break;
+    }
+  }
+
+  if (!uidMatch) {
+    Serial.println("This card's UID does not match expected UID.");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Authenticate for sector 1
+  byte blockAddr = 4;
+  MFRC522::StatusCode status = rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Authentication failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Read license plate (block 4)
+  byte buffer[18];
+  byte size = 18;
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed (block 4): ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+  String licensePlate = "";
+  for (byte i = 0; i < 16; i++) {
+    if (buffer[i] != ' ') licensePlate += (char)buffer[i];
+  }
+
+  // Read cash amount (block 5)
+  blockAddr = 5;
+  status = rfid.MIFARE_Read(blockAddr, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Read failed (block 5): ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+  String cashStr = "";
+  for (byte i = 0; i < 16; i++) {
+    if (buffer[i] != ' ') cashStr += (char)buffer[i];
+  }
+  long currentCash = cashStr.toInt();
+
+  // Send data to Python
+  Serial.print("DATA:");
+  Serial.print(licensePlate);
+  Serial.print(",");
+  Serial.println(currentCash);
+
+  // Wait for CHARGE from Python
+  while (Serial.available() == 0) {}
+  String chargeStr = Serial.readStringUntil('\n');
+  if (!chargeStr.startsWith("CHARGE:")) {
+    Serial.println("Invalid charge format received");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+  long charge = chargeStr.substring(7).toInt();
+
+  // Update cash amount
+  long newCash = currentCash - charge;
+  if (newCash < 0) {
+    Serial.println("Insufficient funds!");
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Write new cash amount (block 5)
+  String newCashStr = String(newCash);
+  for (byte i = 0; i < 16; i++) {
+    buffer[i] = (i < newCashStr.length()) ? newCashStr[i] : ' ';
+  }
+  blockAddr = 5;
+  status = rfid.MIFARE_Write(blockAddr, buffer, 16);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print("Write failed: ");
+    Serial.println(rfid.GetStatusCodeName(status));
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
+    return;
+  }
+
+  // Send DONE signal
+  Serial.println("DONE");
+
+  // Print transaction details
+  Serial.println("--------------------------------");
+  Serial.println("    Parking Fee Calculation");
+  Serial.println("--------------------------------");
+  Serial.print("License Plate: ");
+  Serial.println(licensePlate);
+  Serial.print("Charge: ");
+  Serial.print(charge);
+  Serial.println(" units");
+  Serial.print("Previous Balance: ");
+  Serial.print(currentCash);
+  Serial.println(" units");
+  Serial.print("New Balance: ");
+  Serial.print(newCash);
+  Serial.println(" units");
+  Serial.println("--------------------------------");
+
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+  delay(1000);
+}
