@@ -24,27 +24,17 @@ void setup() {
 }
 
 void loop() {
-  // Check for a new card
+  // Wait for a card
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return;
   }
 
-  // Verify the UID
-  byte expectedUID[] = {0xE3, 0x6E, 0x0A, 0x97};
-  bool uidMatch = true;
+  Serial.print("Card detected. UID: ");
   for (byte i = 0; i < rfid.uid.size; i++) {
-    if (rfid.uid.uidByte[i] != expectedUID[i]) {
-      uidMatch = false;
-      break;
-    }
+    Serial.print(rfid.uid.uidByte[i], HEX);
+    Serial.print(" ");
   }
-
-  if (!uidMatch) {
-    Serial.println("This card's UID does not match E3 6E 0A 97. Aborting write.");
-    rfid.PICC_HaltA();
-    rfid.PCD_StopCrypto1();
-    return;
-  }
+  Serial.println();
 
   // Authenticate for sector 1 (blocks 4-7) using key A
   byte sector = 1;
@@ -57,14 +47,14 @@ void loop() {
   }
 
   // Prepare data for block 4 (license plate)
-  byte buffer[18]; // 16 bytes data + 2 bytes CRC
+  byte buffer[16];
   byte size = 16;
   for (byte i = 0; i < size; i++) {
-    buffer[i] = (i < licensePlate.length()) ? licensePlate[i] : ' '; // Pad with spaces
+    buffer[i] = (i < licensePlate.length()) ? licensePlate[i] : ' ';
   }
 
   // Write to block 4
-  Serial.print("Writing license plate to block 4...");
+  Serial.print("Writing license plate to block 4... ");
   status = rfid.MIFARE_Write(blockAddr, buffer, size);
   if (status != MFRC522::STATUS_OK) {
     Serial.print("Write failed: ");
@@ -76,11 +66,11 @@ void loop() {
   // Prepare data for block 5 (cash amount)
   blockAddr = 5;
   for (byte i = 0; i < size; i++) {
-    buffer[i] = (i < cashAmount.length()) ? cashAmount[i] : ' '; // Pad with spaces
+    buffer[i] = (i < cashAmount.length()) ? cashAmount[i] : ' ';
   }
 
   // Write to block 5
-  Serial.print("Writing cash amount to block 5...");
+  Serial.print("Writing cash amount to block 5... ");
   status = rfid.MIFARE_Write(blockAddr, buffer, size);
   if (status != MFRC522::STATUS_OK) {
     Serial.print("Write failed: ");
@@ -89,8 +79,8 @@ void loop() {
   }
   Serial.println("Done");
 
-  // Halt PICC and stop encryption
+  // Halt the card and stop encryption
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
-  delay(1000);
+  delay(1500); // Short delay before allowing next card
 }

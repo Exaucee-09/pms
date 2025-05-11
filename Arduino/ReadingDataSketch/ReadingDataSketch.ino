@@ -25,22 +25,12 @@ void loop() {
     return;
   }
 
-  // Verify the UID
-  byte expectedUID[] = {0xE3, 0x6E, 0x0A, 0x97};
-  bool uidMatch = true;
+  Serial.print("Card detected. UID: ");
   for (byte i = 0; i < rfid.uid.size; i++) {
-    if (rfid.uid.uidByte[i] != expectedUID[i]) {
-      uidMatch = false;
-      break;
-    }
+    Serial.print(rfid.uid.uidByte[i], HEX);
+    Serial.print(" ");
   }
-
-  if (!uidMatch) {
-    Serial.println("This card's UID does not match E3 6E 0A 97.");
-    rfid.PICC_HaltA();
-    rfid.PCD_StopCrypto1();
-    return;
-  }
+  Serial.println();
 
   // Authenticate for sector 1 (blocks 4-7) using key A
   byte sector = 1;
@@ -54,7 +44,7 @@ void loop() {
 
   // Read block 4 (license plate)
   byte buffer[18]; // 16 bytes data + 2 bytes CRC
-  byte size = 18;
+  byte size = sizeof(buffer);
   Serial.print("Reading license plate from block 4: ");
   status = rfid.MIFARE_Read(blockAddr, buffer, &size);
   if (status != MFRC522::STATUS_OK) {
@@ -81,8 +71,8 @@ void loop() {
   }
   Serial.println();
 
-  // Halt PICC and stop encryption
+  // Halt card and stop encryption
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
-  delay(1000);
+  delay(1500);
 }
